@@ -1,4 +1,4 @@
-# app.py - Versión Final y Completa (con índice_competitividad)
+# app.py - Versión Final y Completa 040925
 
 import streamlit as st
 import geopandas as gpd
@@ -10,10 +10,11 @@ from langchain_community.utilities import SQLDatabase
 from streamlit_folium import st_folium
 from pathlib import Path
 import folium
+import pandas as pd
 
 # --- 1. Configuración de la Página ---
 st.set_page_config(
-    page_title="Análisis Electoral Manzanillo",
+    page_title="Inteligencia Electoral Manzanillo",
     page_icon="🗳️",
     layout="wide"
 )
@@ -53,6 +54,31 @@ def cargar_y_perfilar_datos(ruta_archivo):
         st.error(f"Error al cargar y perfilar los datos: {e}")
         return None
 
+@st.cache_data
+def calcular_promedios_municipales(_df):
+    """Calcula promedios municipales para comparaciones."""
+    return {
+        'participacion': _df['tasa_participacion_promedio'].mean(),
+        'competitividad': _df['indice_competitividad'].mean(),
+        'digitalizacion': _df['indice_digitalizacion'].mean(),
+        'escolaridad': _df['GRAPROES'].mean(),
+        'jovenes': _df['porc_jovenes'].mean(),
+        'adultos_mayores': _df['porc_adultos_mayores'].mean(),
+        'sin_servicios_salud': _df['porc_sin_servicios_salud'].mean(),
+        'desocupacion': _df['tasa_desocupacion'].mean()
+    }
+
+def obtener_semaforo_competitividad(valor):
+    """Devuelve color y descripción según el índice de competitividad."""
+    if valor >= 80:
+        return "🔥", "MUY Alta", "Campo de batalla electoral", "red"
+    elif valor >= 60:
+        return "⚡", "Alta", "Zona de disputa", "orange"
+    elif valor >= 40:
+        return "🟡", "Media", "Moderadamente disputada", "yellow"
+    else:
+        return "🛡️", "Baja", "Sección consolidada", "green"
+
 @st.cache_resource
 def inicializar_agente(_df):
     """Inicializa la DB y el agente SQL con el prompt estratégico."""
@@ -61,8 +87,8 @@ def inicializar_agente(_df):
         engine = create_engine('sqlite:///manzanillo_data.db')
         df_analisis.to_sql('secciones', engine, index=False, if_exists='replace')
         db = SQLDatabase(engine=engine)
-        llm = ChatOpenAI(model="gpt-4o", temperature=0.1)
-        
+        llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.1)
+
         # --- INICIO DEL PROMPT COMPLETO Y RESTAURADO ---
         prompt_personalizado = """
 ### Persona y Tarea Principal
@@ -103,15 +129,16 @@ Aquí tienes el significado de las columnas más importantes para tu análisis:
 
 # --- 3. APLICACIÓN PRINCIPAL ---
 
-st.title("Prototipo de Inteligencia Electoral: Manzanillo")
+st.title("Plataforma de Inteligencia Electoral: Manzanillo")
 st.markdown("Analiza datos seccionales con mapas interactivos, KPIs y consultas inteligentes con IA.")
-
 
 DIRECTORIO_SCRIPT = Path(__file__).parent
 RUTA_DATOS_FINAL = DIRECTORIO_SCRIPT / "1_datos" / "02_procesados" / "gdf_final_auditado.gpkg"
 gdf_data = cargar_y_perfilar_datos(RUTA_DATOS_FINAL)
 
 if gdf_data is not None:
+    # Calcular promedios municipales
+    promedios = calcular_promedios_municipales(gdf_data)
     
     with st.sidebar:
         st.header("🎛️ Controles del Mapa")
@@ -123,13 +150,13 @@ if gdf_data is not None:
         opciones_visualizacion = {
             'Tasa de Participación (%)': 'tasa_participacion_promedio',
             'Porcentaje Voto Morena': 'pct_voto_morena',
-            'Índice de Competitividad': 'indice_competitividad',  # <--- Nuevo índice
+            'Índice de Competitividad': 'indice_competitividad',
             'Índice de Digitalización': 'indice_digitalizacion',
         }
         opcion_seleccionada_nombre = st.selectbox("Variable a visualizar:", options=list(opciones_visualizacion.keys()))
         columna_a_visualizar = opciones_visualizacion[opcion_seleccionada_nombre]
         st.divider()
-        st.header("📌 Detalle de Sección")
+        st.header("📍 Detalle de Sección")
         detalle_placeholder = st.empty()
 
     if perfil_seleccionado == "— Mostrar Todas las Secciones —":
@@ -160,192 +187,269 @@ if gdf_data is not None:
             ).add_to(m)
         map_data = st_folium(m, use_container_width=True, height=600)
 
-    # --- Chat con agente ---
-    with col_chat:
-        col_titulo, col_limpiar = st.columns([3, 1])
-        with col_titulo:
-            st.subheader("🤖 Analista Virtual Estratégico")
-        with col_limpiar:
-            if st.button("🗑️ Limpiar Chat", help="Borrar historial de conversación"):
-                st.session_state.messages = [{"role": "assistant", "content": "Hola, soy tu analista estratégico. ¿Qué necesitas evaluar?"}]
-                st.rerun()
-        
-        agente_sql = inicializar_agente(gdf_data)
-        if agente_sql:
-            if "messages" not in st.session_state:
-                st.session_state.messages = [{"role": "assistant", "content": "Hola, soy tu analista estratégico. ¿Qué necesitas evaluar?"}]
-            
-            if len(st.session_state.messages) > 10:
-                st.warning("💡 El historial está largo. Considera limpiar el chat para mejor rendimiento.")
-            
-            chat_container = st.container(height=400)
-            with chat_container:
-                for message in st.session_state.messages:
-                    with st.chat_message(message["role"]):
-                        st.markdown(message["content"])
-            
-            if prompt := st.chat_input("Ej: Secciones más competitivas..."):
-                st.session_state.messages.append({"role": "user", "content": prompt})
-                
-                with chat_container:
-                    with st.chat_message("user"):
-                        st.markdown(prompt)
-                    with st.chat_message("assistant"):
-                        with st.spinner("🔍 Analizando y formulando estrategia..."):
-                            response = agente_sql.invoke(prompt)
-                            respuesta_texto = response['output']
-                            st.markdown(respuesta_texto)
-                
-                st.session_state.messages.append({"role": "assistant", "content": respuesta_texto})
-                st.rerun()
-
-    # --- Panel de detalle ---
-    seccion_seleccionada_data = None
-    if map_data and map_data.get("last_active_drawing"):
-        properties = map_data["last_active_drawing"]["properties"]
-        seccion_seleccionada_data = gdf_data[gdf_data['seccion'] == properties['seccion']].iloc[0]
+# --- Chat con agente ---
+with col_chat:
+    col_titulo, col_limpiar = st.columns([3, 1])
+    with col_titulo:
+        st.subheader("🤖 Analista Virtual Estratégico")
+    with col_limpiar:
+        if st.button("🗑️ Limpiar Chat", help="Borrar historial de conversación"):
+            st.session_state.messages = [{"role": "assistant", "content": "Hola, soy tu analista estratégico. ¿Qué necesitas evaluar?"}]
+            st.rerun()
     
-    with detalle_placeholder.container():
-        if seccion_seleccionada_data is not None:
-            seccion_id = seccion_seleccionada_data.get('seccion', 'N/A')
-            perfil = seccion_seleccionada_data.get('perfil_descriptivo', 'No disponible')
-            partido_dom = seccion_seleccionada_data.get('partido_dominante', 'N/A')
-            participacion = seccion_seleccionada_data.get('tasa_participacion_promedio', 0.0)
-            voto_morena = seccion_seleccionada_data.get('pct_voto_morena', 0.0)
-            voto_oposicion = seccion_seleccionada_data.get('pct_voto_oposicion', 0.0)
-            indice_competitividad = seccion_seleccionada_data.get('indice_competitividad', 0.0)
-            escolaridad = seccion_seleccionada_data.get('GRAPROES', 0.0)
-            digitalizacion = seccion_seleccionada_data.get('indice_digitalizacion', 0.0)
-            jovenes = seccion_seleccionada_data.get('porc_jovenes', 0.0)
-            adultos_mayores = seccion_seleccionada_data.get('porc_adultos_mayores', 0.0)
-            migrantes = seccion_seleccionada_data.get('porc_poblacion_migrante', 0.0)
-            hogares_jefa_mujer = seccion_seleccionada_data.get('porc_hogares_jefa_mujer', 0.0)
-            sin_servicios_salud = seccion_seleccionada_data.get('porc_sin_servicios_salud', 0.0)
-            desocupacion = seccion_seleccionada_data.get('tasa_desocupacion', 0.0)
+    agente_sql = inicializar_agente(gdf_data)
+    if agente_sql:
+        # 1. Inicializar el historial de chat si no existe
+        if "messages" not in st.session_state:
+            st.session_state.messages = [{"role": "assistant", "content": "Hola, soy tu analista estratégico. ¿Qué necesitas evaluar?"}]
+        
+        # 2. Mostrar todos los mensajes del historial en el contenedor
+        chat_container = st.container(height=400)
+        with chat_container:
+            for message in st.session_state.messages:
+                with st.chat_message(message["role"]):
+                    st.markdown(message["content"])
+        
+        # 3. Aceptar la entrada del usuario del cuadro de texto.
+        #    Esta sección ahora SOLO agrega el mensaje del usuario y refresca.
+        if prompt := st.chat_input("Ej: Secciones más competitivas..."):
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            st.rerun()
+
+        # 4. NUEVA LÓGICA CENTRAL DE RESPUESTA
+        #    Se ejecuta después del refresco (causado por el botón o el chat_input).
+        #    Revisa si el último mensaje es del usuario. Si es así, el asistente debe responder.
+        if st.session_state.messages[-1]["role"] == "user":
+            # Usamos el mismo contenedor para mostrar la respuesta en progreso
+            with chat_container:
+                with st.chat_message("assistant"):
+                    with st.spinner("🔍 Analizando y formulando estrategia..."):
+                        # Obtiene el último prompt del historial para enviarlo al agente
+                        ultimo_prompt_usuario = st.session_state.messages[-1]["content"]
+                        response = agente_sql.invoke(ultimo_prompt_usuario)
+                        respuesta_texto = response['output']
+                        st.markdown(respuesta_texto)
             
-            st.subheader(f"📍 Sección {seccion_id}")
-            st.info(f"**Perfil:** {perfil}")
+            # Agrega la respuesta del asistente al historial para que sea permanente
+            st.session_state.messages.append({"role": "assistant", "content": respuesta_texto})
+
+
+# --- INICIA EL NUEVO CÓDIGO DEL PANEL ---
+
+# --- PANEL DE DETALLE MEJORADO ---
+seccion_seleccionada_data = None
+if map_data and map_data.get("last_active_drawing"):
+    properties = map_data["last_active_drawing"]["properties"]
+    seccion_seleccionada_data = gdf_data[gdf_data['seccion'] == properties['seccion']].iloc[0]
+
+with detalle_placeholder.container():
+    if seccion_seleccionada_data is not None:
+        # Extraer datos
+        seccion_id = seccion_seleccionada_data.get('seccion', 'N/A')
+        perfil = seccion_seleccionada_data.get('perfil_descriptivo', 'No disponible')
+        partido_dom = seccion_seleccionada_data.get('partido_dominante', 'N/A')
+        participacion = seccion_seleccionada_data.get('tasa_participacion_promedio', 0.0)
+        voto_morena = seccion_seleccionada_data.get('pct_voto_morena', 0.0)
+        voto_oposicion = seccion_seleccionada_data.get('pct_voto_oposicion', 0.0)
+        indice_competitividad = seccion_seleccionada_data.get('indice_competitividad', 0.0)
+        escolaridad = seccion_seleccionada_data.get('GRAPROES', 0.0)
+        digitalizacion = seccion_seleccionada_data.get('indice_digitalizacion', 0.0)
+        jovenes = seccion_seleccionada_data.get('porc_jovenes', 0.0)
+        adultos_mayores = seccion_seleccionada_data.get('porc_adultos_mayores', 0.0)
+        migrantes = seccion_seleccionada_data.get('porc_poblacion_migrante', 0.0)
+        hogares_jefa_mujer = seccion_seleccionada_data.get('porc_hogares_jefa_mujer', 0.0)
+        sin_servicios_salud = seccion_seleccionada_data.get('porc_sin_servicios_salud', 0.0)
+        desocupacion = seccion_seleccionada_data.get('tasa_desocupacion', 0.0)
+        
+        # Header más limpio
+        st.subheader(f"Sección {seccion_id}")
+        st.caption(f"Perfil predominante: {perfil}")
+        
+        if isinstance(partido_dom, str) and partido_dom != 'N/A':
+            st.info(f"**Partido Dominante:** {partido_dom.title()}")
+        
+        # --- EXPANSOR 1: INDICADORES ELECTORALES ---
+        with st.expander("📊 **Indicadores Electorales**", expanded=True):
+            tab1, tab2 = st.tabs(["Participación & Competitividad", "Preferencias Partidistas"])
             
-            if isinstance(partido_dom, str) and partido_dom != 'N/A':
-                st.metric(label="Partido Dominante", value=partido_dom.title())
-            
-            st.markdown("### 🗳️ **Indicadores Electorales**")
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.metric(
-                    label="Participación Electoral",
-                    value=f"{participacion:.1f}%",
-                    help="Porcentaje de ciudadanos registrados que votan"
-                )
+            with tab1:
+                col1, col2 = st.columns(2)
                 
-            with col2:
-                st.metric(
-                    label="Voto Morena",
-                    value=f"{voto_morena:.1f}%",
-                    help="Porcentaje histórico de votos para Morena"
-                )
+                with col1:
+                    st.metric(
+                        label="Participación Electoral", 
+                        value=f"{participacion:.1f}%", 
+                        delta=f"{(participacion - promedios['participacion']):+.1f}% vs Promedio"
+                    )
                 
-            with col3:
-                if indice_competitividad >= 80:
-                    comp_texto = "🔥 MUY Alta"
-                    comp_desc = "Campo de batalla electoral"
-                elif indice_competitividad >= 60:
-                    comp_texto = "⚡ Alta"
-                    comp_desc = "Zona de disputa"
-                elif indice_competitividad >= 40:
-                    comp_texto = "🟡 Media"
-                    comp_desc = "Moderadamente disputada"
-                else:
-                    comp_texto = "🏛️ Baja"
-                    comp_desc = "Sección consolidada"
-                    
-                st.metric(
-                    label="Índice de Competitividad",
-                    value=comp_texto,
-                    help=f"{comp_desc}. Valor calculado: {indice_competitividad:.1f} (0 = no competitivo, 100 = muy competitivo)"
-                )
+                with col2:
+                    emoji, nivel, desc, color = obtener_semaforo_competitividad(indice_competitividad)
+                    st.metric(
+                        label=f"Competitividad ({nivel})", 
+                        value=f"{indice_competitividad:.0f}/100",
+                        delta=f"{(indice_competitividad - promedios['competitividad']):+.0f} vs Promedio",
+                        help=f"{emoji} {desc}"
+                    )
             
-            # --- Perfil sociodemográfico ---
+            with tab2:
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Voto Histórico Morena", f"{voto_morena:.1f}%")
+                with col2:
+                    st.metric("Voto Histórico Oposición", f"{voto_oposicion:.1f}%")
+        
+        # --- EXPANSOR 2: PERFIL SOCIODEMOGRÁFICO ---
+        with st.expander("👥 **Perfil Sociodemográfico**"):
+            tab1, tab2, tab3 = st.tabs(["Demografía", "Educación & Tecnología", "Indicadores Sociales"])
+            
+            with tab1:
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric(
+                        label="👨‍🎓 Jóvenes (18-24)",
+                        value=f"{jovenes:.1f}%",
+                        delta=f"{(jovenes - promedios['jovenes']):+.1f}% vs Promedio"
+                    )
+                with col2:
+                    st.metric(
+                        label="👴 Adultos Mayores (+65)",
+                        value=f"{adultos_mayores:.1f}%",
+                        delta=f"{(adultos_mayores - promedios['adultos_mayores']):+.1f}% vs Promedio"
+                    )
+                
+                st.divider()
+                col3, col4 = st.columns(2)
+                with col3:
+                    st.metric("Población Migrante", f"{migrantes:.1f}%")
+                with col4:
+                    st.metric("Hogares Jefa Mujer", f"{hogares_jefa_mujer:.1f}%")
+            
+            with tab2:
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric(
+                        label="📚 Escolaridad Promedio",
+                        value=f"{escolaridad:.1f} años",
+                        delta=f"{(escolaridad - promedios['escolaridad']):+.1f} años vs Promedio"
+                    )
+                with col2:
+                    st.metric(
+                        label="📱 Índice de Digitalización",
+                        value=f"{digitalizacion:.0f}/100",
+                        delta=f"{(digitalizacion - promedios['digitalizacion']):+.0f} vs Promedio"
+                    )
+            
+            with tab3:
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric(
+                        label="💼 Tasa de Desocupación",
+                        value=f"{desocupacion:.1f}%",
+                        delta=f"{(desocupacion - promedios['desocupacion']):+.1f}% vs Promedio"
+                    )
+                with col2:
+                    st.metric(
+                        label="🏥 Sin Servicios de Salud",
+                        value=f"{sin_servicios_salud:.1f}%",
+                        delta=f"{(sin_servicios_salud - promedios['sin_servicios_salud']):+.1f}% vs Promedio"
+                    )
+        
+        # --- EXPANSOR 3: CONTEXTO MUNICIPAL ---
+        with st.expander("🏙️ **Contexto Municipal**"):
+            st.caption("Posición de la sección dentro del municipio")
+            
+            # Ranking de la sección
+            ranking_participacion = (gdf_data['tasa_participacion_promedio'].rank(ascending=False, method='min').loc[seccion_seleccionada_data.name]).astype(int)
+            ranking_competitividad = (gdf_data['indice_competitividad'].rank(ascending=False, method='min').loc[seccion_seleccionada_data.name]).astype(int)
+            
             col1, col2 = st.columns(2)
             with col1:
-                st.markdown(f"""
-                **📚 Educación y Tecnología**
-                - Escolaridad promedio: **{escolaridad:.1f} años**
-                - Índice digitalización: **{digitalizacion:.0f}/100**
-                
-                **🏠 Composición Poblacional**
-                - Jóvenes (18-24): **{jovenes:.1f}%**
-                - Adultos mayores (+65): **{adultos_mayores:.1f}%**
-                - Población migrante: **{migrantes:.1f}%**
-                """)
-            with col2:
-                st.markdown(f"""
-                **💼 Indicadores Socioeconómicos**
-                - Hogares con jefa mujer: **{hogares_jefa_mujer:.1f}%**
-                - Tasa de desocupación: **{desocupacion:.1f}%**
-                - Sin servicios de salud: **{sin_servicios_salud:.1f}%**
-                
-                **⚖️ Balance Político**
-                - Voto oposición: **{voto_oposicion:.1f}%**
-                """)
-            
-            # --- Insights rápidos ---
-            st.markdown("### 🎯 **Análisis Estratégico Rápido**")
-            insights = []
-            if participacion > 70:
-                insights.append("🟢 **Alta participación cívica** - Ciudadanía comprometida")
-            elif participacion < 50:
-                insights.append("🔴 **Baja participación** - Oportunidad de movilización")
-            else:
-                insights.append("🟡 **Participación moderada** - Potencial de crecimiento")
-                
-            if indice_competitividad >= 80:
-                insights.append("🔥 **Sección muy competitiva** - Campo de batalla, cada voto cuenta")
-            elif indice_competitividad >= 60:
-                insights.append("⚡ **Sección competitiva** - Zona de disputa electoral")
-            elif indice_competitividad <= 30:
-                insights.append("🏛️ **Dominio partidista** - Sección consolidada")
-                
-            if digitalizacion > 70:
-                insights.append("📱 **Alta conectividad** - Estrategias digitales efectivas")
-            elif digitalizacion < 30:
-                insights.append("📻 **Baja digitalización** - Enfocar en medios tradicionales")
-                
-            if jovenes > 25:
-                insights.append("👨‍🎓 **Población joven** - Mensajes de cambio y oportunidad")
-            if adultos_mayores > 15:
-                insights.append("👴 **Población envejecida** - Mensajes de estabilidad y seguridad")
-            if sin_servicios_salud > 20:
-                insights.append("🏥 **Vulnerabilidad en salud** - Priorizar políticas sanitarias")
-            
-            # CORRECCIÓN: Esta línea estaba mal indentada
-            for insight in insights:
-                st.markdown(f"- {insight}")
-                
-            # Botón para análisis detallado
-            if st.button(f"🔍 Análisis Detallado Sección {seccion_id}", use_container_width=True):
-                # Trigger análisis con el chatbot
-                consulta_detallada = (
-                    f"Analiza en detalle la sección {seccion_id}, incluyendo fortalezas, "
-                    f"debilidades y recomendaciones estratégicas específicas"
+                st.metric(
+                    label="Ranking de Participación", 
+                    value=f"#{ranking_participacion}",
+                    help=f"Posición entre {len(gdf_data)} secciones (1 = más alta)"
                 )
-                st.session_state.messages.append({"role": "user", "content": consulta_detallada})
-                
-        else:
-            st.info("Haz clic en una sección del mapa para ver sus detalles aquí.")
-            st.markdown("""
-            ### 💡 **Cómo usar este panel:**
-            1. **Haz clic** en cualquier sección del mapa
-            2. **Visualiza** métricas electorales y sociodemográficas
-            3. **Obtén insights** estratégicos automáticos
-            4. **Solicita análisis** detallado con el botón
+            with col2:
+                st.metric(
+                    label="Ranking de Competitividad", 
+                    value=f"#{ranking_competitividad}",
+                    help=f"Posición entre {len(gdf_data)} secciones (1 = más competitiva)"
+                )
+        
+        # --- EXPANSOR 4: INSIGHTS ESTRATÉGICOS ---
+        with st.expander("🎯 **Análisis Estratégico Automático**"):
+            insights = []
             
-            ### 📊 **Variables disponibles:**
-            - Indicadores electorales (participación, preferencias, **índice de competitividad**)
-            - Demografía (edad, migración, género)
-            - Socioeconómicos (educación, empleo, salud)
-            - Tecnológicos (digitalización)
-            """)
-else:
-    st.warning("⚠️ No se pudieron cargar los datos.")
+            # Análisis de participación
+            if participacion > promedios['participacion'] + 5:
+                insights.append("🟢 **Fortaleza:** Alta participación cívica - Ciudadanía comprometida")
+            elif participacion < promedios['participacion'] - 5:
+                insights.append("🔴 **Oportunidad:** Baja participación - Potencial de movilización")
+            else:
+                insights.append("🟡 **Estándar:** Participación dentro del promedio municipal")
+            
+            # Análisis de competitividad
+            if indice_competitividad >= 80:
+                insights.append("🔥 **Crítico:** Sección muy competitiva - Campo de batalla, cada voto cuenta")
+            elif indice_competitividad >= 60:
+                insights.append("⚡ **Importante:** Sección competitiva - Zona de disputa electoral")
+            elif indice_competitividad <= 30:
+                insights.append("🛡️ **Estable:** Dominio partidista consolidado")
+            
+            # Análisis tecnológico
+            if digitalizacion > promedios['digitalizacion'] + 10:
+                insights.append("📱 **Ventaja:** Alta conectividad - Estrategias digitales efectivas")
+            elif digitalizacion < promedios['digitalizacion'] - 10:
+                insights.append("📻 **Adaptación:** Baja digitalización - Enfocar en medios tradicionales")
+            
+            # Análisis demográfico
+            if jovenes > promedios['jovenes'] + 5:
+                insights.append("👨‍🎓 **Perfil:** Población joven - Mensajes de cambio y oportunidad")
+            if adultos_mayores > promedios['adultos_mayores'] + 5:
+                insights.append("👴 **Perfil:** Población envejecida - Mensajes de estabilidad y seguridad")
+            
+            # Análisis de vulnerabilidad
+            if sin_servicios_salud > promedios['sin_servicios_salud'] + 5:
+                insights.append("🏥 **Prioridad:** Vulnerabilidad en salud - Enfoque en políticas sanitarias")
+            
+            if desocupacion > promedios['desocupacion'] + 2:
+                insights.append("💼 **Preocupación:** Alta desocupación - Oportunidad para propuestas de empleo")
+            
+            # Mostrar insights
+            for insight in insights:
+                st.markdown(f"• {insight}")
+            
+            if not insights:
+                st.info("Esta sección presenta un perfil equilibrado sin características sobresalientes.")
+        
+        # Botón para análisis detallado con el chatbot
+        st.divider()
+        if st.button(f"🔍 **Solicitar Análisis Detallado**", use_container_width=True, type="primary"):
+            consulta_detallada = (
+                f"Analiza en detalle la sección {seccion_id}, incluyendo fortalezas, "
+                f"debilidades y recomendaciones estratégicas específicas basadas en todos sus indicadores"
+            )
+            st.session_state.messages.append({"role": "user", "content": consulta_detallada})
+            st.rerun()
+    
+    else:
+        st.info("👆 **Selecciona una sección** del mapa para ver su análisis detallado")
+        st.markdown("""
+        ### 💡 **Cómo usar este panel:**
+        
+        **Paso 1:** Haz clic en cualquier sección del mapa
+        **Paso 2:** Explora los indicadores organizados en pestañas
+        **Paso 3:** Revisa el análisis automático generado
+        **Paso 4:** Solicita análisis personalizado con IA
+        
+        ### 📊 **Nuevas funcionalidades:**
+        
+        • **Indicadores directos** para visualización rápida
+        • **Comparaciones municipales** automáticas  
+        • **Rankings** de posición relativa
+        • **Insights estratégicos** generados automáticamente
+        • **Organización por pestañas** para mejor navegación
+        """)
+
+# --- FINALIZA EL NUEVO CÓDIGO DEL PANEL ---
+
