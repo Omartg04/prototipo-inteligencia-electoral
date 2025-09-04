@@ -1,0 +1,12 @@
+# .streamlit/config.toml
+
+[theme]
+# El tema principal que se carga por defecto (Dark)
+primaryColor="#5a78d1"
+backgroundColor="#0f1116"
+secondaryBackgroundColor="#1c202a"
+textColor="#fafafa"
+font="sans serif"
+
+[server]
+runOnSave = true
