@@ -32,15 +32,30 @@ def generar_perfil_seccion(fila, umbrales):
     if fila['indice_digitalizacion'] > umbrales['Alta Digitalización']: perfiles.append("Alta Digitalización")
     return "Predominantemente " + ", ".join(perfiles) if perfiles else "Perfil Mixto / Promedio"
 
-@st.cache_data
+
 def cargar_y_perfilar_datos(ruta_archivo):
-    """Carga los datos y aplica el perfilamiento de forma optimizada."""
+    """
+    Carga los datos, RECALCULA una métrica de participación/movilización
+    consistente, y aplica el perfilamiento.
+    """
     try:
         gdf = gpd.read_file(ruta_archivo).to_crs("EPSG:4326")
-
-        # --- NUEVO: Crear índice de competitividad ---
+        
+               
+        # 1. Eliminamos la columna original que no es confiable.
+        if 'tasa_participacion_promedio' in gdf.columns:
+            gdf = gdf.drop(columns=['tasa_participacion_promedio'])
+            
+        # 2. Creamos nuestro nuevo y consistente "Índice de Movilización Histórica".
+        # Evitamos división por cero por si alguna lista nominal fuera 0.
+        gdf['indice_movilizacion'] = gdf.apply(
+            lambda row: row['votos_totales_acumulados'] / row['lista_nominal_promedio'] if row['lista_nominal_promedio'] > 0 else 0,
+            axis=1
+        )
+        # 3. Creamos el índice de competitividad intuitivo
         gdf['indice_competitividad'] = 100 - gdf['competitividad']
-
+     
+    
         umbrales = {
             'Jóvenes': gdf['porc_jovenes'].quantile(0.70),
             'Migrantes': gdf['porc_poblacion_migrante'].quantile(0.70),
@@ -49,25 +64,27 @@ def cargar_y_perfilar_datos(ruta_archivo):
             'Alta Digitalización': gdf['indice_digitalizacion'].quantile(0.70),
         }
         gdf['perfil_descriptivo'] = gdf.apply(generar_perfil_seccion, axis=1, umbrales=umbrales)
+        
         return gdf
     except Exception as e:
         st.error(f"Error al cargar y perfilar los datos: {e}")
         return None
-
+        
 @st.cache_data
 def calcular_promedios_municipales(_df):
-    """Calcula promedios municipales para comparaciones."""
-    return {
-        'participacion': _df['tasa_participacion_promedio'].mean(),
+    """Calcula los promedios de las métricas clave para todo el municipio."""
+    promedios = {
+        'movilizacion': _df['indice_movilizacion'].mean(), # <-- CORREGIDO: Usa la nueva métrica
         'competitividad': _df['indice_competitividad'].mean(),
-        'digitalizacion': _df['indice_digitalizacion'].mean(),
         'escolaridad': _df['GRAPROES'].mean(),
+        'digitalizacion': _df['indice_digitalizacion'].mean(),
         'jovenes': _df['porc_jovenes'].mean(),
         'adultos_mayores': _df['porc_adultos_mayores'].mean(),
-        'sin_servicios_salud': _df['porc_sin_servicios_salud'].mean(),
-        'desocupacion': _df['tasa_desocupacion'].mean()
+        'desocupacion': _df['tasa_desocupacion'].mean(),
+        'sin_servicios_salud': _df['porc_sin_servicios_salud'].mean()
     }
-
+    return promedios
+    
 def obtener_semaforo_competitividad(valor):
     """Devuelve color y descripción según el índice de competitividad."""
     if valor >= 80:
@@ -100,7 +117,7 @@ Aquí tienes el significado de las columnas más importantes para tu análisis:
 - seccion: El identificador único de la sección electoral.
 - partido_dominante: El partido político con más votos históricos en la sección.
 - pct_voto_morena, pct_voto_oposicion: Porcentaje de votos para Morena y la oposición.
-- tasa_participacion_promedio: Porcentaje de ciudadanos registrados que votan. Es un indicador clave de compromiso cívico.
+- indice_movilizacion: Mide la 'productividad' de votos de una sección a lo largo del tiempo (votos acumulados / votante promedio). NO es un porcentaje. Un valor ALTO indica una movilización electoral histórica muy intensa.
 - indice_competitividad: Un puntaje de 0 a 100 que mide qué tan reñida es una elección. IMPORTANTE: un valor ALTO (cercano a 100) significa MUY COMPETITIVO. Un valor BAJO significa que un partido domina.
 - porc_jovenes: Porcentaje de la población entre 18 y 24 años.
 - porc_adultos_mayores: Porcentaje de la población mayor a 65 años.
@@ -133,7 +150,7 @@ st.title("Plataforma de Inteligencia Electoral: Manzanillo")
 st.markdown("Analiza datos seccionales con mapas interactivos, KPIs y consultas inteligentes con IA.")
 
 DIRECTORIO_SCRIPT = Path(__file__).parent
-RUTA_DATOS_FINAL = DIRECTORIO_SCRIPT / "1_datos" / "02_procesados" / "gdf_final_auditado.gpkg"
+RUTA_DATOS_FINAL = DIRECTORIO_SCRIPT / "1_datos" / "02_procesados" / "dataset_produccion.gpkg"
 gdf_data = cargar_y_perfilar_datos(RUTA_DATOS_FINAL)
 
 if gdf_data is not None:
@@ -148,7 +165,7 @@ if gdf_data is not None:
         st.caption("Selecciona un perfil para aislarlo en el mapa.")
         st.divider()
         opciones_visualizacion = {
-            'Tasa de Participación (%)': 'tasa_participacion_promedio',
+            "Índice de Movilización": "indice_movilizacion",
             'Porcentaje Voto Morena': 'pct_voto_morena',
             'Índice de Competitividad': 'indice_competitividad',
             'Índice de Digitalización': 'indice_digitalizacion',
@@ -248,7 +265,7 @@ with detalle_placeholder.container():
         seccion_id = seccion_seleccionada_data.get('seccion', 'N/A')
         perfil = seccion_seleccionada_data.get('perfil_descriptivo', 'No disponible')
         partido_dom = seccion_seleccionada_data.get('partido_dominante', 'N/A')
-        participacion = seccion_seleccionada_data.get('tasa_participacion_promedio', 0.0)
+        movilizacion = seccion_seleccionada_data.get('indice_movilizacion', 0.0)
         voto_morena = seccion_seleccionada_data.get('pct_voto_morena', 0.0)
         voto_oposicion = seccion_seleccionada_data.get('pct_voto_oposicion', 0.0)
         indice_competitividad = seccion_seleccionada_data.get('indice_competitividad', 0.0)
@@ -270,16 +287,16 @@ with detalle_placeholder.container():
         
         # --- EXPANSOR 1: INDICADORES ELECTORALES ---
         with st.expander("📊 **Indicadores Electorales**", expanded=True):
-            tab1, tab2 = st.tabs(["Participación & Competitividad", "Preferencias Partidistas"])
+            tab1, tab2 = st.tabs(["Movilización/Competitividad", "Preferencias Partidistas"])
             
             with tab1:
                 col1, col2 = st.columns(2)
                 
                 with col1:
                     st.metric(
-                        label="Participación Electoral", 
-                        value=f"{participacion:.1f}%", 
-                        delta=f"{(participacion - promedios['participacion']):+.1f}% vs Promedio"
+                        label="Movilización Electoral", 
+                        value=f"{movilizacion:.1f}%", 
+                        delta=f"{(movilizacion - promedios['movilizacion']):+.1f}% vs Promedio"
                     )
                 
                 with col2:
@@ -359,14 +376,14 @@ with detalle_placeholder.container():
             st.caption("Posición de la sección dentro del municipio")
             
             # Ranking de la sección
-            ranking_participacion = (gdf_data['tasa_participacion_promedio'].rank(ascending=False, method='min').loc[seccion_seleccionada_data.name]).astype(int)
+            ranking_movilizacion = (gdf_data['indice_movilizacion'].rank(ascending=False, method='min').loc[seccion_seleccionada_data.name]).astype(int)
             ranking_competitividad = (gdf_data['indice_competitividad'].rank(ascending=False, method='min').loc[seccion_seleccionada_data.name]).astype(int)
             
             col1, col2 = st.columns(2)
             with col1:
                 st.metric(
-                    label="Ranking de Participación", 
-                    value=f"#{ranking_participacion}",
+                    label="Ranking de Movilización", 
+                    value=f"#{ranking_movilizacion}",
                     help=f"Posición entre {len(gdf_data)} secciones (1 = más alta)"
                 )
             with col2:
@@ -381,12 +398,12 @@ with detalle_placeholder.container():
             insights = []
             
             # Análisis de participación
-            if participacion > promedios['participacion'] + 5:
-                insights.append("🟢 **Fortaleza:** Alta participación cívica - Ciudadanía comprometida")
-            elif participacion < promedios['participacion'] - 5:
-                insights.append("🔴 **Oportunidad:** Baja participación - Potencial de movilización")
+            if movilizacion > promedios['movilizacion'] + 5:
+                insights.append("🟢 **Fortaleza:** Alta movilización cívica - Ciudadanía comprometida")
+            elif movilizacion < promedios['movilizacion'] - 5:
+                insights.append("🔴 **Oportunidad:** Baja movilización - Potencial de movilización")
             else:
-                insights.append("🟡 **Estándar:** Participación dentro del promedio municipal")
+                insights.append("🟡 **Estándar:** movilización dentro del promedio municipal")
             
             # Análisis de competitividad
             if indice_competitividad >= 80:
