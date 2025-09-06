@@ -135,8 +135,7 @@ Aquí tienes el significado de las columnas más importantes para tu análisis:
 4. Una vez que tengas los resultados, no te limite a mostrarlos. Escribe un resumen ejecutivo en español, explicando los hallazgos y dando recomendaciones prácticas de estrategia electoral o política pública.
 5. Si presentas una lista de secciones, usa un formato de viñetas (bullets).
 6. Siempre responde en español y actúa como un analista político experimentado.
-"""
-        # --- FIN DEL PROMPT ---
+"""# --- FIN DEL PROMPT ---
         
         agente = create_sql_agent(llm=llm, db=db, agent_type="openai-tools", verbose=False, prompt_suffix=prompt_personalizado)
         return agente
@@ -144,6 +143,20 @@ Aquí tienes el significado de las columnas más importantes para tu análisis:
         st.error(f"Error al inicializar el agente LLM: {e}")
         return None
 
+# --- Función búsqueda ---
+def centrar_mapa_en_seccion(gdf, seccion_id):
+    """Centra el mapa en una sección específica y devuelve sus coordenadas."""
+    try:
+        seccion_data = gdf[gdf['seccion'] == seccion_id]
+        if not seccion_data.empty:
+            geometry = seccion_data.iloc[0].geometry
+            centroid = geometry.centroid
+            return float(centroid.y), float(centroid.x), seccion_data.iloc[0]
+        return None, None, None
+    except Exception as e:
+        st.error(f"Error al centrar el mapa: {e}")
+        return None, None, None
+        
 # --- 3. APLICACIÓN PRINCIPAL ---
 
 st.title("Plataforma de Inteligencia Electoral: Manzanillo")
@@ -157,52 +170,180 @@ if gdf_data is not None:
     # Calcular promedios municipales
     promedios = calcular_promedios_municipales(gdf_data)
     
-    with st.sidebar:
-        st.header("🎛️ Controles del Mapa")
+with st.sidebar:
+        st.header("Controles del Mapa")  
         perfiles_unicos = sorted(gdf_data['perfil_descriptivo'].unique())
         opciones_filtro = ["— Mostrar Todas las Secciones —"] + perfiles_unicos
-        perfil_seleccionado = st.selectbox("Filtrar por Perfil Sociodemográfico:", options=opciones_filtro)
+        perfil_seleccionado = st.selectbox("Filtra secciones por Perfil Sociodemográfico:", options=opciones_filtro)
         st.caption("Selecciona un perfil para aislarlo en el mapa.")
+        
         st.divider()
+              
         opciones_visualizacion = {
             "Índice de Movilización": "indice_movilizacion",
             'Porcentaje Voto Morena': 'pct_voto_morena',
             'Índice de Competitividad': 'indice_competitividad',
             'Índice de Digitalización': 'indice_digitalizacion',
         }
-        opcion_seleccionada_nombre = st.selectbox("Variable a visualizar:", options=list(opciones_visualizacion.keys()))
-        columna_a_visualizar = opciones_visualizacion[opcion_seleccionada_nombre]
+        opcion_seleccionada_nombre = st.selectbox("Visualiza por indicador electoral:", options=list(opciones_visualizacion.keys()))
+        columna_a_visualizar = opciones_visualizacion[opcion_seleccionada_nombre]  
         st.divider()
-        st.header("📍 Detalle de Sección")
+
+        # --- BUSCADOR DE SECCIONES CON AUTO-CENTRADO (VERSIÓN ÚNICA Y CORREGIDA) ---
+        st.header("🔍 Buscador de Secciones")
+        
+        # Crear lista de secciones para el selectbox
+        secciones_disponibles = sorted([str(s) for s in gdf_data['seccion'].unique()])
+        secciones_opciones = ["-- Seleccionar sección --"] + secciones_disponibles
+        
+        # Usar un key dinámico para poder resetear el selectbox
+        if 'reset_selector' not in st.session_state:
+            st.session_state.reset_selector = 0
+        
+        seccion_buscar = st.selectbox(
+            "Ir a sección específica:",
+            options=secciones_opciones,
+            key=f"selector_seccion_{st.session_state.reset_selector}"
+        )
+        
+        # Botones para centrar y limpiar
+        col_centrar, col_limpiar_seleccion = st.columns([2, 1])
+        
+        with col_centrar:
+            centrar_clicked = st.button("📍 Re-centrar", disabled=(seccion_buscar == "-- Seleccionar sección --"))
+        
+        with col_limpiar_seleccion:
+            if st.button("🔄", help="Limpiar selección", key="limpiar_btn"):
+                # Limpiar TODOS los states relacionados
+                if 'centrar_seccion' in st.session_state:
+                    del st.session_state.centrar_seccion
+                if 'ultima_seccion_seleccionada' in st.session_state:
+                    del st.session_state.ultima_seccion_seleccionada
+                # Cambiar el key del selectbox para forzar reset visual
+                st.session_state.reset_selector += 1
+                st.rerun()
+        
+        # LÓGICA DE AUTO-CENTRADO: Detectar cambios en la selección
+        auto_centrar = False
+        if seccion_buscar != "-- Seleccionar sección --":
+            # Verificar si cambió la selección
+            if 'ultima_seccion_seleccionada' not in st.session_state:
+                st.session_state.ultima_seccion_seleccionada = ""
+            
+            if seccion_buscar != st.session_state.ultima_seccion_seleccionada:
+                auto_centrar = True
+                st.session_state.ultima_seccion_seleccionada = seccion_buscar
+        else:
+            # Si volvió a "-- Seleccionar sección --", limpiar tracking
+            if 'ultima_seccion_seleccionada' in st.session_state:
+                st.session_state.ultima_seccion_seleccionada = ""
+            # También limpiar el centrado si no hay sección seleccionada
+            if 'centrar_seccion' in st.session_state:
+                del st.session_state.centrar_seccion
+        
+        # Procesar centrado (manual o automático)
+        if (centrar_clicked or auto_centrar) and seccion_buscar != "-- Seleccionar sección --":
+            try:
+                seccion_id = int(seccion_buscar)
+                lat, lon, datos_seccion = centrar_mapa_en_seccion(gdf_data, seccion_id)
+                
+                if lat is not None and lon is not None:
+                    # Guardar en session_state para usar en el mapa
+                    st.session_state.centrar_seccion = {
+                        'lat': lat, 
+                        'lon': lon, 
+                        'seccion': seccion_id,
+                        'datos': datos_seccion
+                    }
+                    if centrar_clicked:  # Solo mostrar mensaje si fue manual
+                        st.success(f"✅ Re-centrando mapa en sección {seccion_id}")
+                    elif auto_centrar:
+                        st.success(f"📍 Mostrando sección {seccion_id}")
+                        st.rerun()  # Rerun inmediato para auto-centrado
+                else:
+                    if seccion_id not in gdf_data['seccion'].values:
+                        st.error(f"❌ Sección {seccion_id} no encontrada")
+                    else:
+                        st.error(f"❌ Sección {seccion_id} no visible con el filtro actual")
+            except ValueError:
+                st.error("❌ ID de sección inválido")
+        
+        # Mostrar información de sección seleccionada
+        if seccion_buscar != "-- Seleccionar sección --":
+            try:
+                seccion_id = int(seccion_buscar)
+                seccion_info = gdf_data[gdf_data['seccion'] == seccion_id]
+                if not seccion_info.empty:
+                    info = seccion_info.iloc[0]
+                    st.info(f"""
+**Sección {seccion_id}**
+📍 Perfil: {info['perfil_descriptivo']}
+🏛️ Dominante: {info.get('partido_dominante', 'N/A')}
+📊 Competitividad: {info.get('indice_competitividad', 0):.0f}/100
+                    """)
+            except (ValueError, IndexError):
+                pass
+        
+        st.divider()
+
+   
+        st.header("Detalle de Sección")
         detalle_placeholder = st.empty()
 
-    if perfil_seleccionado == "— Mostrar Todas las Secciones —":
-        gdf_filtrado = gdf_data
-    else:
-        gdf_filtrado = gdf_data[gdf_data['perfil_descriptivo'] == perfil_seleccionado]
+if perfil_seleccionado == "— Mostrar Todas las Secciones —":
+    gdf_filtrado = gdf_data
+else:
+    gdf_filtrado = gdf_data[gdf_data['perfil_descriptivo'] == perfil_seleccionado]
 
-    col_mapa, col_chat = st.columns([2, 1])
+col_mapa, col_chat = st.columns([2, 1])
 
-    with col_mapa:
-        st.subheader("🗺️ Exploración Geoespacial")
-        st.info(f"Mostrando **{len(gdf_filtrado)}** de **{len(gdf_data)}** secciones.")
-        m = gdf_filtrado.explore(
-            column=columna_a_visualizar, cmap='plasma', tooltip=['seccion', 'perfil_descriptivo'],
-            popup=False, legend=True, scheme='quantiles',
-            legend_kwds={'caption': opcion_seleccionada_nombre},
-            style_kwds={'stroke': True, 'color': 'black', 'weight': 0.6},
-            tiles="CartoDB positron"
-        )
-        for idx, row in gdf_filtrado.iterrows():
-            centroid = row.geometry.centroid
-            folium.Marker(
-                location=[centroid.y, centroid.x],
-                icon=folium.DivIcon(
-                    icon_size=(150,36), icon_anchor=(7,20),
-                    html=f'<div style="font-size: 11pt; font-weight: bold; color: #333; text-shadow: 1px 1px 2px white;">{row.seccion}</div>',
-                )
-            ).add_to(m)
-        map_data = st_folium(m, use_container_width=True, height=600)
+
+# BLOQUE 3: CREACIÓN DEL MAPA    
+with col_mapa:
+    st.subheader("🗺️ Exploración Geoespacial")
+    st.info(f"Mostrando **{len(gdf_filtrado)}** de **{len(gdf_data)}** secciones.")
+    
+    # Crear el mapa base
+    m = gdf_filtrado.explore(
+        column=columna_a_visualizar, cmap='plasma', tooltip=['seccion', 'perfil_descriptivo'],
+        popup=False, legend=True, scheme='quantiles',
+        legend_kwds={'caption': opcion_seleccionada_nombre},
+        style_kwds={'stroke': True, 'color': 'black', 'weight': 0.6},
+        tiles="CartoDB positron"
+    )    
+    
+    # Configuración de zoom y centro por defecto
+    zoom_personalizado = 12
+    
+    # *** LÓGICA DE CENTRADO ***
+    if 'centrar_seccion' in st.session_state:
+        centro_data = st.session_state.centrar_seccion
+        m.location = [centro_data['lat'], centro_data['lon']]
+        zoom_personalizado = 16  # Zoom más cercano para la sección específica
+        
+        # Agregar marcador especial para la sección seleccionada
+        folium.Marker(
+            location=[centro_data['lat'], centro_data['lon']],
+            icon=folium.Icon(color='red', icon='star', prefix='fa'),
+            popup=f"Sección {centro_data['seccion']} (Seleccionada)",
+            tooltip=f"Sección {centro_data['seccion']} - SELECCIONADA"
+        ).add_to(m)
+    
+    # Aplicar zoom personalizado (DEBE IR DESPUÉS del centrado)
+    m.zoom_start = zoom_personalizado
+    
+    # Agregar números de sección como marcadores
+    for idx, row in gdf_filtrado.iterrows():
+        centroid = row.geometry.centroid
+        folium.Marker(
+            location=[centroid.y, centroid.x],
+            icon=folium.DivIcon(
+                icon_size=(150,36), icon_anchor=(7,20),
+                html=f'<div style="font-size: 11pt; font-weight: bold; color: #333; text-shadow: 1px 1px 2px white;">{row.seccion}</div>',
+            )
+        ).add_to(m)
+    
+    map_data = st_folium(m, use_container_width=True, height=600)
 
 # --- Chat con agente ---
 with col_chat:
@@ -459,13 +600,7 @@ with detalle_placeholder.container():
         **Paso 3:** Revisa el análisis automático generado
         **Paso 4:** Solicita análisis personalizado con IA
         
-        ### 📊 **Nuevas funcionalidades:**
-        
-        • **Indicadores directos** para visualización rápida
-        • **Comparaciones municipales** automáticas  
-        • **Rankings** de posición relativa
-        • **Insights estratégicos** generados automáticamente
-        • **Organización por pestañas** para mejor navegación
+
         """)
 
 # --- FINALIZA EL NUEVO CÓDIGO DEL PANEL ---
