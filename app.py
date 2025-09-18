@@ -159,7 +159,7 @@ def centrar_mapa_en_seccion(gdf, seccion_id):
         
 # --- 3. APLICACIÓN PRINCIPAL ---
 
-st.title("Plataforma de Inteligencia Electoral: Manzanillo")
+st.title("Sistema de Inteligencia Electoral: Manzanillo")
 st.markdown("Analiza datos seccionales con mapas interactivos, KPIs y consultas inteligentes con IA.")
 
 DIRECTORIO_SCRIPT = Path(__file__).parent

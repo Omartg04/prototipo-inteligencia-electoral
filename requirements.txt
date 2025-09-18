@@ -2,6 +2,7 @@ streamlit
 geopandas
 folium
 mapclassify
+matplotlib
 streamlit-folium
 sqlalchemy
 langchain
