@@ -1,5 +1,7 @@
 streamlit
 geopandas
+folium
+mapclassify
 streamlit-folium
 sqlalchemy
 langchain
