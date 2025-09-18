@@ -2,5 +2,7 @@ streamlit
 geopandas
 streamlit-folium
 sqlalchemy
+langchain
+langchain-community
 langchain-openai
 langchain-anthropic
