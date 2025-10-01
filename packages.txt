@@ -1,2 +1,7 @@
-gdal-bin
+build-essential
+unixodbc-common
+libodbc2
+libodbcinst2
+unixodbc
 libgdal-dev
+gdal-bin
