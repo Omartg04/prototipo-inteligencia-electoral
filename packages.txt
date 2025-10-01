@@ -1,3 +1,4 @@
+unixodbc-common
 libodbc2
 libodbcinst2
 gdal-bin
