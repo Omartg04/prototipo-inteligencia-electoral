@@ -104,7 +104,8 @@ def inicializar_agente(_df):
         engine = create_engine('sqlite:///manzanillo_data.db')
         df_analisis.to_sql('secciones', engine, index=False, if_exists='replace')
         db = SQLDatabase(engine=engine)
-        llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.1)
+        openai_api_key = st.secrets["OPENAI_API_KEY"]
+        llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.1,api_key=openai_api_key)
 
         # --- INICIO DEL PROMPT COMPLETO Y RESTAURADO ---
         prompt_personalizado = """
