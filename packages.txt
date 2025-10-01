@@ -1,3 +1,11 @@
+# Dependencias base para construir paquetes
 build-essential
+
+# Dependencias de sistema para GDAL/Geopandas
 libgdal-dev
 gdal-bin
+
+# Dependencias ODBC explícitas para resolver el conflicto de GDAL
+libodbc2
+odbcinst
+unixodbc
