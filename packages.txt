@@ -2,5 +2,5 @@ build-essential
 libgdal-dev
 gdal-bin
 libodbc2
-odbcinst
+libodbcinst2
 unixodbc
