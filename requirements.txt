@@ -1,4 +1,7 @@
 streamlit==1.38.0
+fiona
+pyproj
+shapely
 geopandas==0.13.2
 folium==0.17.0
 mapclassify==2.6.1
