@@ -1,5 +1,5 @@
 streamlit==1.38.0
-geopandas==0.14.4
+geopandas==0.13.2
 folium==0.17.0
 mapclassify==2.6.1
 matplotlib==3.9.0
