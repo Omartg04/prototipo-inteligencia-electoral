@@ -1,3 +1,4 @@
+import streamlit as st
 import langchain
 import langchain_community
 st.write("LangChain version:", langchain.__version__)
