@@ -1,3 +1,9 @@
+import langchain
+import langchain_community
+st.write("LangChain version:", langchain.__version__)
+st.write("LangChain Community version:", langchain_community.__version__)
+
+
 # app.py - Versión Final y Completa 040925
 
 import streamlit as st
