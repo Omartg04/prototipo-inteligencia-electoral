@@ -1,23 +1,26 @@
-import streamlit as st
-import langchain
-import langchain_community
-st.write("LangChain version:", langchain.__version__)
-st.write("LangChain Community version:", langchain_community.__version__)
-
-
 # app.py - Versión Final y Completa 040925
 
-import streamlit as st
-import geopandas as gpd
+# --- CORE LIBRARIES ---
 import os
-from sqlalchemy import create_engine
-from langchain_openai import ChatOpenAI
-from langchain.agents import create_sql_agent
-from langchain_community.utilities import SQLDatabase
-from streamlit_folium import st_folium
 from pathlib import Path
-import folium
+
+# --- DATA & ANALYSIS ---
 import pandas as pd
+import geopandas as gpd
+from sqlalchemy import create_engine
+import folium
+import matplotlib.pyplot as plt
+import mapclassify
+
+# --- STREAMLIT & VISUALIZATION ---
+import streamlit as st
+from streamlit_folium import st_folium
+
+# --- LANGCHAIN ECOSYSTEM ---
+from langchain_openai import ChatOpenAI
+from langchain_community.agent_toolkits.sql.base import create_sql_agent
+from langchain_community.utilities import SQLDatabase
+
 
 # --- 1. Configuración de la Página ---
 st.set_page_config(
